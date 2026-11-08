@@ -1,0 +1,6 @@
+.env
+*.key
+__pycache__/
+coach_data/
+*.pyc
+.venv/
