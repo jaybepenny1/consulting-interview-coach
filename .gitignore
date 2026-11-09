@@ -4,3 +4,4 @@ __pycache__/
 coach_data/
 *.pyc
 .venv/
+tests/harness/results/

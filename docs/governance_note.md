@@ -18,6 +18,6 @@ Reject saves nothing. The brief is also machine-checked first: it must cite only
 **What a stranger can and cannot make the agent do.** They can chat, run mock interviews, and make the Researcher search and read public
 web pages. They cannot read other visitors' data, make the agent fetch internal or private addresses (private, loopback and cloud
 metadata addresses and non-web schemes are blocked, including after redirects), get the answer key (instructions plus an output filter),
-change the agent's rules, or obtain keys. Spend is capped: 700 output tokens per answer, 12 tool calls and 20 model calls per message,
+change the agent's rules, or obtain keys. Spend is capped: 1,500 output tokens per answer, 20 tool calls and 30 model calls per message,
 30 messages per visitor, 300 messages per day across everyone, one instance. These guards are pattern-based and are not guarantees;
 Milestone III will test them with the injection attempts collected from the logs.

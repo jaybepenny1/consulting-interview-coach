@@ -66,5 +66,5 @@ Then delete both API keys.
 Push the repo, then Settings -> Pages -> Deploy from branch -> `main` and folder `/docs`. Edit `docs/index.html` and replace `CLOUD_RUN_URL` with your service link. GitHub Pages only hosts the landing page; the agent runs on Cloud Run.
 
 ## Safety limits (see `coach/config.py`)
-700 output tokens per answer, 12 tool calls and 20 model calls per message, 30 messages per visitor, 300 per day overall, 1500 characters per message.
+1,500 output tokens per answer, 20 tool calls and 30 model calls per message, 30 messages per visitor, 300 per day overall, 1500 characters per message.
 Only post the link in the Agent Arcade thread (classmates may try prompt injection there and nowhere else).

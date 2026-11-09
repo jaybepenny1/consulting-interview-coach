@@ -187,7 +187,7 @@ async def main():
     config.MAX_TOOL_CALLS_PER_TURN = 3
     res = [agents.guard_tool_call(Tool, {}, Ctx) for _ in range(5)]
     assert res[:3] == [None] * 3 and "limit reached" in res[3]["result"]
-    config.MAX_TOOL_CALLS_PER_TURN = 12
+    config.MAX_TOOL_CALLS_PER_TURN = 20
     ok("tool-call cap per turn")
 asyncio.run(main())
 

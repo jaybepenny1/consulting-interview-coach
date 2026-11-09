@@ -9,9 +9,9 @@ DATA_DIR = Path(os.environ.get("COACH_DATA_DIR", "/tmp/coach_data"))   # ephemer
 DATA_TTL_HOURS = 24
 
 # ---- cost / abuse caps (the "BEFORE YOU SHARE" limits) ----
-MAX_OUTPUT_TOKENS = 700            # per model answer
-MAX_TOOL_CALLS_PER_TURN = 12       # per user message
-MAX_LLM_CALLS_PER_TURN = 20        # per user message (ADK RunConfig)
+MAX_OUTPUT_TOKENS = 1500           # per model answer
+MAX_TOOL_CALLS_PER_TURN = 20       # per user message
+MAX_LLM_CALLS_PER_TURN = 30        # per user message (ADK RunConfig)
 MAX_MESSAGES_PER_SESSION = int(os.environ.get("COACH_MAX_MESSAGES", "30"))   # per visitor
 GLOBAL_MESSAGES_PER_DAY = int(os.environ.get("COACH_GLOBAL_CAP", "300"))     # resets on restart
 MAX_INPUT_CHARS = 1500
