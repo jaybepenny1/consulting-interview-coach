@@ -69,6 +69,10 @@ Push the repo, then Settings -> Pages -> Deploy from branch -> `main` and folder
 - `/stop` (or the Stop session button) ends a practice session early.
 - Microphone: speak an answer (up to 60 seconds); it is transcribed by Gemini into the text box for you to edit before sending.
 - Webcam: record yourself and watch it back. The video stays in the browser and is never uploaded.
+- Read replies aloud: toggle under the chat; uses the browser's own voice (nothing is sent anywhere for it).
+- My documents: view-only dropdown of your saved brief, plan and stories, with a download link. No file uploads.
+- Brief links are shown as site names; the approval card has a one-click view of the exact text with full links.
+- A link to the GSU Consulting Club under the chat. Edit `CLUB_PLUG` in `coach/ui.py` to change the wording.
 - Security: the Researcher can only open URLs its own search returned; images are stripped from model output; agents no longer
   see each other's sensitive tool results; the Critic cannot be reached while an interview is still running.
 - Evidence: `docs/attack_session.md` (manual attack checklist and log export), test pages in `docs/redteam/`, 17 eval cases (9 adversarial).

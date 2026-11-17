@@ -23,6 +23,31 @@ def _user_dir(user_id: str) -> Path:
     return d
 
 
+# Documents a visitor may view or download: fixed labels mapped to fixed filenames in THEIR OWN folder.
+# Nothing the visitor types ever becomes a path.
+DOCS = {"Firm brief": "brief.md", "Prep plan": "plan.md", "Story bank": "stories.md"}
+MAX_DOC_CHARS = 20000
+
+
+def doc_choices(user_id: str) -> list:
+    d = _user_dir(user_id)
+    return [label for label, fn in DOCS.items() if (d / fn).is_file()]
+
+
+def doc_path(user_id: str, label: str):
+    """Path of one of this visitor's own documents, or None."""
+    fn = DOCS.get(label)
+    if not fn:
+        return None
+    p = _user_dir(user_id) / fn
+    return p if p.is_file() else None
+
+
+def read_doc(user_id: str, label: str):
+    p = doc_path(user_id, label)
+    return p.read_text(errors="replace")[:MAX_DOC_CHARS] if p else None
+
+
 def _load_mem(user_id: str) -> dict:
     path = _user_dir(user_id) / "memory.json"
     try:

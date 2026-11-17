@@ -1,26 +1,34 @@
 """Gradio chat UI: colors, approval card (exact arguments), spoken answers, and a webcam recorder
 that never leaves the visitor's browser."""
+import base64
 import json
 import gradio as gr
 
-from . import config
+from . import config, security
 from .runtime import Hub
+from .store import doc_choices, read_doc
 
 WELCOME = (
     "Welcome! I'm an AI consulting interview coach, a team of four agents: Coach, Researcher, Interviewer and Critic. "
     "Tell me which firm and role you're interviewing for, how many days you have, and how much case practice you've done, "
-    "or tap an example on the right. You can type or speak your answers. Type /help for commands and /stop to end a "
-    "practice session early.")
+    "or tap an example on the right. You can type or speak your answers, and turn on 'Read replies aloud' to listen. "
+    "Type /help for commands and /stop to end a practice session early.")
 PRIVACY = (
     "**Privacy and safety.** This is a class demo. Your messages go to Google's Gemini API and, for research, search queries go to Tavily. "
     "If you use the microphone, the recording is sent to Gemini to be turned into text and is then deleted. "
-    "Webcam recordings never leave your device. Don't enter personal or sensitive information. Everything you create is stored only "
+    "Webcam recordings never leave your device, and 'Read replies aloud' uses your browser's own voice, so nothing is sent anywhere for it. Don't enter personal or sensitive information. Everything you create is stored only "
     "temporarily and you can erase it with **Delete my data**. Nothing real is connected: no email, payments or company data.")
 
 EXAMPLES = [
     ("Example 1: beginner", "I'm a junior with no case practice. I have a Bain Associate Consultant Intern interview in 10 days. Please start my prep."),
     ("Example 2: advanced", "I'm advanced, I've done 40+ cases for McKinsey and my weak spot is market sizing math. I have 5 days. Run a market sizing case."),
 ]
+CLUB_URL = "https://www.consultingclubgsu.com/"
+CLUB_PLUG = ('<div id="club-plug"><span>🎓💼 Interested in learning more about consulting? Connect with the Consulting Club at GSU. 🚀🤝</span>'
+             f'<a href="{CLUB_URL}" target="_blank" rel="noopener noreferrer">CCG Website 🔗</a></div>')
+DL_NAMES = {"Firm brief": "firm-brief.md", "Prep plan": "prep-plan.md", "Story bank": "story-bank.md"}
+DOC_EMPTY = ("_Nothing saved yet. Your firm brief, prep plan and stories show up here after they are saved. "
+             "Documents are temporary, so download anything you want to keep._")
 QUICK = [("Mock case", "/case"), ("Behavioral", "/behavioral"), ("Framework drill", "/framework"),
          ("Math drill", "/math"), ("Get feedback", "/feedback"), ("Write a story", "/story"), ("What do you remember?", "/memory")]
 
@@ -42,7 +50,24 @@ CSS = """
 .who-critic {background: #db2777;} .who-system {background: #64748b;}
 #gate {border: 2px solid #f59e0b; border-radius: 14px; background: rgba(245,158,11,.08); padding: 10px 14px;}
 #stop-btn {background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5;}
-#cam-box video {width: 100%; border-radius: 12px; background: #0f172a; margin-top: 8px;}
+#cam-box video {width: 100%; max-height: 240px; object-fit: cover; border-radius: 12px; background: #0f172a; margin-top: 8px;}
+#gate-text {max-height: 440px; overflow-y: auto; font-size: .95rem; line-height: 1.55; overflow-wrap: anywhere;}
+#gate-text h1, #doc-view h1 {font-size: 1.1rem; margin: .7em 0 .25em;}
+#gate-text h2, #doc-view h2 {font-size: 1.02rem; margin: .6em 0 .2em;}
+#gate-text h3 {font-size: 1.05rem;}
+#gate-text pre, #doc-view pre {white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere;}
+#gate-text summary {cursor: pointer; font-weight: 600; color: #4338ca;}
+#doc-view {max-height: 380px; overflow-y: auto; font-size: .92rem; line-height: 1.5; overflow-wrap: anywhere;
+           border: 1px solid #e2e8f0; border-radius: 12px; padding: 8px 12px;}
+.dl-btn {display: inline-block; margin-top: 6px; padding: 6px 14px; border-radius: 10px; background: #4f46e5;
+         color: #fff !important; font-weight: 600; font-size: .9rem; text-decoration: none;}
+#club-plug {display: flex; align-items: center; justify-content: space-between; gap: 10px 16px; flex-wrap: wrap;
+            font-size: .95rem; padding: 10px 14px; border-radius: 12px; background: rgba(79,70,229,.08);
+            border: 1px solid rgba(79,70,229,.30);}
+#club-plug a {display: inline-block; padding: 10px 24px; border-radius: 12px; background: #4f46e5; color: #fff !important;
+              font-weight: 700; font-size: 1.05rem; text-decoration: none; white-space: nowrap;
+              box-shadow: 0 4px 12px rgba(79,70,229,.35); transition: transform .12s ease, box-shadow .12s ease;}
+#club-plug a:hover {transform: translateY(-1px); box-shadow: 0 6px 16px rgba(79,70,229,.45);}
 #cam-box .cam-row {display: flex; gap: 8px; flex-wrap: wrap; align-items: center;}
 #cam-box button, #cam-box a.cam-btn {border: 0; border-radius: 10px; padding: 7px 14px; font-weight: 600; cursor: pointer;
      background: #4f46e5; color: #fff; text-decoration: none; font-size: .9rem;}
@@ -68,7 +93,7 @@ CAM_HTML = """<div id="cam-box">
 </div>"""
 
 # Runs in the visitor's browser only. Nothing here sends video anywhere.
-HEAD = """<script>
+HEAD = r"""<script>
 (function () {
   var stream = null, rec = null, chunks = [], timer = null, lastUrl = null, MAX_MS = 180000;
   function el(id) { return document.getElementById(id); }
@@ -114,14 +139,71 @@ HEAD = """<script>
     if (t.id === 'cam-start') start(); else stopAll();
   });
 })();
+
+// Read replies aloud: the browser's own text-to-speech. Text never leaves the tab.
+(function () {
+  window.__spoken = 1;               // the welcome message is already on screen
+  var PITCH = { Coach: 1.0, Researcher: 0.9, Interviewer: 1.1, Critic: 0.85, System: 1.0 };
+  var RATE = { Coach: 1.0, Researcher: 1.0, Interviewer: 1.0, Critic: 0.95, System: 1.0 };
+  function readable(content) {
+    var t = '';
+    if (typeof content === 'string') { t = content; }
+    else if (Array.isArray(content)) {   // the page stores message content as a list of parts
+      t = content.map(function (c) { return typeof c === 'string' ? c : ((c && c.text) || ''); }).join(' ');
+    } else { t = (content && content.text) || ''; }
+    var m = t.match(/<span class="who[^"]*">([^<]+)<\/span>/);
+    var who = m ? m[1] : 'Coach';
+    t = t.replace(/<[^>]*>/g, ' ')
+         .replace(/```[\s\S]*?```/g, ' ')
+         .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+         .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+         .replace(/https?:\/\/\S+/g, ' ')
+         .split('\n').filter(function (l) { return !/^\s*\|/.test(l); }).join('\n')
+         .replace(/^[#>\-\*\s]+/gm, '')
+         .replace(/[*_`~]/g, '')
+         .replace(/\s+/g, ' ').trim();
+    return { who: who, text: t };
+  }
+  function pieces(t) {
+    var out = [], cur = '';
+    (t.match(/[^.!?]+[.!?]*\s*/g) || [t]).forEach(function (s) {
+      if (cur && (cur + s).length > 180) { out.push(cur); cur = s; } else { cur += s; }
+    });
+    if (cur) out.push(cur);
+    return out;
+  }
+  window.coachSpeak = function (history, on) {
+    if (!history) return;
+    if (history.length < window.__spoken) window.__spoken = history.length;
+    var fresh = history.slice(window.__spoken);
+    window.__spoken = history.length;
+    if (!on || !window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    fresh.forEach(function (m) {
+      if (!m || m.role !== 'assistant') return;
+      var r = readable(m.content), text = r.text, cut = false;
+      if (text.length > 700) { text = text.slice(0, 700); cut = true; }
+      if (!text) return;
+      pieces(text).forEach(function (chunk) {
+        var u = new SpeechSynthesisUtterance(chunk);
+        u.pitch = PITCH[r.who] || 1.0; u.rate = RATE[r.who] || 1.0;
+        window.speechSynthesis.speak(u);
+      });
+      if (cut) window.speechSynthesis.speak(new SpeechSynthesisUtterance('The rest is on screen.'));
+    });
+  };
+  window.coachStopSpeaking = function () { if (window.speechSynthesis) window.speechSynthesis.cancel(); };
+  if (window.speechSynthesis) window.speechSynthesis.getVoices();
+})();
 </script>"""
 
+SPEAK_JS = "(history, on) => window.coachSpeak(history, on)"
 LAUNCH_KWARGS = {"theme": THEME, "css": CSS, "head": HEAD}
 
 
 # ---------------------------------------------------------------- rendering helpers
 def bubble(who: str, body: str) -> str:
-    return f'<span class="who who-{who.lower()}">{who}</span>\n\n{body}'
+    return f'<span class="who who-{who.lower()}">{who}</span>\n\n{security.shorten_links(body)}'
 
 
 def steps_md(v):
@@ -144,14 +226,41 @@ def steps_md(v):
     return "\n".join(out)
 
 
+def _fence(text: str) -> str:
+    longest = max([len(m) for m in __import__("re").findall(r"`+", text)] or [0])
+    return "`" * max(3, longest + 1)
+
+
 def gate_md(p):
+    """The approval card. The brief is shown as readable text (images removed, links shown as site names);
+    the exact text that will be saved, with full links, is one click away so nothing is hidden."""
     if not p:
         return ""
-    blocks = []
+    shown, raw = [], []
     for k, val in (p["args"] or {}).items():
-        blocks.append(f"**{k}**\n\n```\n{val if isinstance(val, str) else json.dumps(val, indent=2)}\n```")
+        text = val if isinstance(val, str) else json.dumps(val, indent=2)
+        f = _fence(text)
+        raw.append(f"**{k}**\n\n{f}\n{text}\n{f}")
+        if k == "brief":
+            shown.append(security.shorten_links(security.sanitize_output(text, log=False)))
+        else:
+            shown.append(f"_{k}: {text}_")
     return (f"### Approval needed\nThe **{p['who']}** wants to run **`{p['tool']}`**, which saves this text to your session "
-            f"so the Coach can build your plan from it. Nothing is saved until you approve. Exactly what it will use:\n\n" + "\n\n".join(blocks))
+            f"so the Coach can build your plan from it. Nothing is saved until you approve.\n\n"
+            + "\n\n".join(shown)
+            + "\n\n<details><summary>Show the exact text that will be saved (full links)</summary>\n\n"
+            + "\n\n".join(raw) + "\n\n</details>")
+
+
+def dl_link(label, text):
+    """Download link built in the page itself (a data: link), so no file is served from the server."""
+    data = base64.b64encode(text.encode("utf-8")).decode("ascii")
+    return (f'<a class="dl-btn" download="{DL_NAMES.get(label, "document.md")}" '
+            f'href="data:text/markdown;charset=utf-8;base64,{data}">⬇ Download this document</a>')
+
+
+def doc_md(text):
+    return security.shorten_links(security.sanitize_output(text, log=False))
 
 
 def left_md(v):
@@ -172,6 +281,15 @@ def build_demo(hub: Hub = None):
     def on_load():
         v = hub.new_visitor()
         return v, left_md(v)
+
+    def refresh_docs(v, selected):
+        """Fill the documents dropdown from THIS visitor's own folder (fixed labels, fixed filenames)."""
+        choices = doc_choices(v["id"]) if v else []
+        sel = selected if selected in choices else (choices[0] if choices else None)
+        raw = read_doc(v["id"], sel) if sel else None
+        if raw is None:
+            return gr.update(choices=choices, value=sel), DOC_EMPTY, ""
+        return gr.update(choices=choices, value=sel), doc_md(raw), dl_link(sel, raw)
 
     async def respond(message, history, v):
         v = v or hub.new_visitor()
@@ -215,8 +333,9 @@ def build_demo(hub: Hub = None):
         with gr.Row():
             with gr.Column(scale=3):
                 chat = gr.Chatbot(value=[{"role": "assistant", "content": bubble("Coach", WELCOME)}], height=480, label="Chat")
+                gr.HTML(CLUB_PLUG)
                 with gr.Group(visible=False, elem_id="gate") as gate:
-                    gate_text = gr.Markdown("")
+                    gate_text = gr.Markdown("", elem_id="gate-text")
                     with gr.Row():
                         approve = gr.Button("✅ Approve and save", variant="primary")
                         reject = gr.Button("❌ Reject", variant="stop")
@@ -225,30 +344,46 @@ def build_demo(hub: Hub = None):
                     send = gr.Button("Send", variant="primary")
                     stop_btn = gr.Button("Stop session", elem_id="stop-btn")
                     wipe_btn = gr.Button("Delete my data", variant="secondary")
+                with gr.Row():
+                    speak = gr.Checkbox(label="🔊 Read replies aloud", value=False, elem_id="speak-toggle", scale=3)
+                    stop_speak = gr.Button("Stop speaking", size="sm", scale=1)
                 voice = gr.Audio(sources=["microphone"], type="filepath", format="wav", elem_id="voice",
                                  label=f"Speak your answer (up to {config.MAX_AUDIO_SECONDS} seconds). It appears as text for you to check before sending.")
                 voice_note = gr.Markdown("")
                 left = gr.Markdown(left_md(None))
             with gr.Column(scale=2):
+                with gr.Accordion("Record yourself on camera (stays on your device)", open=True):
+                    gr.HTML(CAM_HTML)
+                with gr.Accordion("My documents (view only)", open=True):
+                    doc_sel = gr.Dropdown(choices=[], value=None, label="Saved documents", interactive=True)
+                    doc_view = gr.Markdown(DOC_EMPTY, elem_id="doc-view")
+                    doc_dl = gr.HTML("")
                 gr.Markdown("**Try an example**")
                 ex_btns = [(gr.Button(label, size="sm"), prompt) for label, prompt in EXAMPLES]
                 gr.Markdown("**Quick actions**")
                 q_btns = [(gr.Button(label, size="sm"), cmd) for label, cmd in QUICK]
-                with gr.Accordion("Record yourself on camera (stays on your device)", open=False):
-                    gr.HTML(CAM_HTML)
                 with gr.Accordion("What the agents are doing", open=True):
                     activity = gr.Markdown(steps_md(None))
                 with gr.Accordion("What the coach remembers", open=False):
                     memory_box = gr.Textbox(lines=8, interactive=False, show_label=False)
         outs = [chat, activity, memory_box, state, msg, gate, gate_text, left]
+        docs_outs = [doc_sel, doc_view, doc_dl]
+
+        def after(evt):
+            """After every turn: refresh the documents list, then read the new replies aloud if the toggle is on."""
+            return (evt.then(refresh_docs, [state, doc_sel], docs_outs, api_name=False)
+                       .then(None, [chat, speak], None, js=SPEAK_JS, api_name=False, queue=False))
+
         demo.load(on_load, None, [state, left], api_name=False)
-        msg.submit(respond, [msg, chat, state], outs, api_name="respond")
-        send.click(respond, [msg, chat, state], outs, api_name=False)
-        approve.click(decide, [gr.State(True), chat, state], outs, api_name=False)
-        reject.click(decide, [gr.State(False), chat, state], outs, api_name=False)
-        wipe_btn.click(wipe, [chat, state], outs, api_name=False)
+        after(msg.submit(respond, [msg, chat, state], outs, api_name="respond"))
+        after(send.click(respond, [msg, chat, state], outs, api_name=False))
+        after(approve.click(decide, [gr.State(True), chat, state], outs, api_name=False))
+        after(reject.click(decide, [gr.State(False), chat, state], outs, api_name=False))
+        after(wipe_btn.click(wipe, [chat, state], outs, api_name=False))
+        doc_sel.input(refresh_docs, [state, doc_sel], docs_outs, api_name=False)
+        stop_speak.click(None, None, None, js="() => window.coachStopSpeaking()", queue=False, api_name=False)
         voice.stop_recording(on_voice, [voice, msg, state], [msg, voice, voice_note, state], api_name=False)
         for btn, text in ex_btns + q_btns + [(stop_btn, "/stop")]:
-            btn.click(lambda t=text: t, None, msg, queue=False, api_name=False).then(
-                respond, [msg, chat, state], outs, api_name=False)
+            after(btn.click(lambda t=text: t, None, msg, queue=False, api_name=False).then(
+                respond, [msg, chat, state], outs, api_name=False))
     return demo

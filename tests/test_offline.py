@@ -308,6 +308,31 @@ out = T.fetch_page(C2, "r", "https://evil.example/page")
 assert "WARNING" in out and "untrusted_web_content" in out
 ok("fetch_page: blocked URL returns error; page with injected instructions is wrapped and flagged")
 
+class C3:
+    state = {"last_interview": {"mode": "math", "answers": 1, "stopped_early": True, "transcript": "", "feedback_saved": False}}
+    invocation_id = "i3"; user_id = "critic-math"
+out = T.get_interview_for_review(C3)
+assert out.startswith("NOTHING TO GRADE") and "coach" in out, out
+assert T.save_feedback(C3, "{}", "a", "b", "c").startswith("ERROR: this session type has no rubric")
+C3.state = {"last_interview": {"mode": "case", "case_id": "profitability", "answers": 1, "stopped_early": True, "transcript": "x"}}
+assert T.get_interview_for_review(C3).startswith("TOO SHORT TO GRADE")
+ok("critic tools: a math drill or a too-short stopped session returns a friendly message, no KeyError (the N8 failure)")
+
+# ---- readable links and the view-only documents list ----
+from coach import store as ST
+assert security.shorten_links("- x https://www.bain.com/careers/x.") == "- x [bain.com](https://www.bain.com/careers/x)."
+assert security.shorten_links("[Bain careers](https://www.bain.com/a)") == "[bain.com](https://www.bain.com/a)"
+assert security.shorten_links("[bain.com](https://evil.example/p?d=1)") == "[evil.example](https://evil.example/p?d=1)", "label must come from the real URL"
+assert security.shorten_links("no links, 3 < 5") == "no links, 3 < 5"
+ok("links are shown as the real site name (computed from the URL, not the model's label); the link target is unchanged")
+ua, ub = "docs-a", "docs-b"
+(ST._user_dir(ua) / "brief.md").write_text("A brief"); (ST._user_dir(ua) / "memory.json").write_text("{}")
+assert ST.doc_choices(ua) == ["Firm brief"] and ST.doc_choices(ub) == []
+assert ST.read_doc(ua, "Firm brief") == "A brief" and ST.read_doc(ub, "Firm brief") is None
+for bad in ["memory.json", "brief.md", "../docs-a/brief.md", "/etc/passwd", "Firm brief/../../x", ""]:
+    assert ST.doc_path(ua, bad) is None and ST.doc_path(ub, bad) is None, bad
+ok("documents: a visitor sees only their own three known files; typed paths and other filenames (memory.json) are refused")
+
 for d in ("easy", "medium", "hard"):
     for _ in range(200):
         q, a, s = T._gen_math(d); assert q.endswith(".") and a == a

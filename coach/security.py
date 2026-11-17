@@ -64,13 +64,46 @@ _MD_IMAGE = re.compile(r"!\[[^\]]*\]\s*(\([^)]*\)|\[[^\]]*\])")
 _HTML_TAG = re.compile(r"<\s*/?\s*(img|iframe|script|style|link|object|embed|video|audio|source|svg|form|input|meta|base)\b[^>]*>?", re.I)
 
 
-def sanitize_output(text: str) -> str:
+def sanitize_output(text: str, log: bool = True) -> str:
     """Remove images and active HTML from model text before it is shown. A browser loads an image URL
     automatically, so an image whose URL the model picked could carry data out without any click."""
     clean = _HTML_TAG.sub("", _MD_IMAGE.sub("[image removed]", text or ""))
-    if clean != (text or ""):
+    if log and clean != (text or ""):
         log_event("output_sanitized")
     return clean
+
+
+# ---------------- readable links (display only) ----------------
+_MD_LINK = re.compile(r"\[([^\]]*)\]\((https?://[^\s)]+)\)")
+_BARE_URL = re.compile(r"(?<![(\[\"'<])(https?://[^\s<>()\[\]]+)")
+
+
+def site_name(url: str) -> str:
+    """The site a URL really points to, e.g. 'bain.com'. Computed from the URL itself, never taken from
+    the model's link text, so a friendly label cannot hide a different destination."""
+    try:
+        host = urlparse(url).hostname or ""
+    except ValueError:
+        host = ""
+    return re.sub(r"^www\.", "", host.lower())
+
+
+def shorten_links(text: str) -> str:
+    """Show every link as its site name (for example [bain.com](full-url)) so sentences stay short.
+    The link target is unchanged. Display only: the saved file keeps the full text."""
+    def md(m):
+        name = site_name(m.group(2))
+        return f"[{name}]({m.group(2)})" if name else m.group(0)
+
+    def bare(m):
+        url = m.group(1)
+        tail = ""
+        while url and url[-1] in ".,;:!?":
+            tail, url = url[-1] + tail, url[:-1]
+        name = site_name(url)
+        return (f"[{name}]({url})" if name else url) + tail
+
+    return _BARE_URL.sub(bare, _MD_LINK.sub(md, text or ""))
 
 
 # ---------------- context isolation between agents ----------------

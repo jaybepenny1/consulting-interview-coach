@@ -30,4 +30,17 @@ gate_text, left = r[4], r[5]
 assert "Approval needed" in gate_text and "save_brief" in gate_text and "https://www.bain.com/careers/x" in gate_text
 assert r[3].get("interactive") is False
 print("GATE CARD OK (visible, exact args shown, textbox locked); counter:", left)
+assert "bain.com](https://www.bain.com/careers/x)" in gate_text and "<details>" in gate_text, "brief should show site names with the exact text one click away"
+print("GATE CARD OK (brief readable with site-name links; exact text with full links inside a details block)")
+# the visitor data folder must not be reachable over HTTP (memory.json holds the profile)
+import urllib.request, urllib.error   # real HTTP (test_offline replaces requests.get with a mock)
+from coach.store import _user_dir
+secret = _user_dir("httpcheck") / "memory.json"; secret.write_text('{"profile": "SECRET-MARKER"}')
+for route in ("gradio_api/file=", "file="):
+    try:
+        body = urllib.request.urlopen(url2 + route + str(secret), timeout=10).read().decode("utf-8", "replace"); code = 200
+    except urllib.error.HTTPError as e:
+        body, code = "", e.code
+    assert code in (403, 404) and "SECRET-MARKER" not in body, (route, code)
+print("FILE SERVING OK: a visitor's saved data cannot be fetched by path")
 demo2.close()

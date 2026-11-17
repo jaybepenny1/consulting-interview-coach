@@ -438,6 +438,13 @@ def get_interview_for_review(tool_context: ToolContext) -> str:
     if not rec:
         return "NO COMPLETED SESSION FOUND. Tell the candidate to run a mock interview first."
     mode = rec["mode"]
+    if mode not in RUBRICS:
+        return ("NOTHING TO GRADE: math drills are scored automatically and have no rubric. Tell the candidate their "
+                "running score from the drill, suggest /case, /behavioral or /framework for graded feedback, then "
+                "transfer to coach.")
+    if rec.get("stopped_early") and rec.get("answers", 0) < 2:
+        return ("TOO SHORT TO GRADE: the candidate stopped after fewer than two answers. Say so in one sentence, "
+                "suggest a longer session, then transfer to coach. Do not call save_feedback.")
     rub = RUBRICS[mode]
     dims = "\n".join(f"  - {k}: {v}" for k, v in rub["dims"].items())
     key = ""
@@ -478,6 +485,8 @@ def save_feedback(
         scores = json.loads(scores_json)
     except Exception:
         return "ERROR: scores_json must be valid JSON, e.g. a mapping of dimension name to integer."
+    if rec["mode"] not in RUBRICS:
+        return "ERROR: this session type has no rubric, so there is nothing to save. Transfer to coach."
     dims = list(RUBRICS[rec["mode"]]["dims"])
     if sorted(scores) != sorted(dims):
         return f"ERROR: scores must contain exactly these dimensions: {', '.join(dims)}."
