@@ -83,6 +83,22 @@ def _user_text_count(session) -> int:
     return n
 
 
+STOP_MARK = "[STOP SESSION]"
+
+
+def _last_user_text(session) -> str:
+    for ev in reversed(session.events):
+        if ev.author == "user" and ev.content:
+            t = " ".join(p.text for p in (ev.content.parts or []) if p.text).strip()
+            if t:
+                return t
+    return ""
+
+
+def _stop_requested(session) -> bool:
+    return _last_user_text(session).startswith(STOP_MARK)
+
+
 def _build_transcript(session, start_idx: int) -> str:
     lines = []
     for ev in session.events[start_idx:]:
@@ -92,6 +108,8 @@ def _build_transcript(session, start_idx: int) -> str:
         if not text:
             continue
         if ev.author == "user":
+            if text.startswith(STOP_MARK):
+                continue
             lines.append(f"CANDIDATE: {text}")
         elif ev.author == "interviewer":
             lines.append(f"INTERVIEWER: {text}")

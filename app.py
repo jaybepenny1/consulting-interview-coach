@@ -11,4 +11,4 @@ demo = ui.build_demo()
 if __name__ == "__main__":
     demo.queue(default_concurrency_limit=2, max_size=20).launch(
         server_name="0.0.0.0", server_port=int(os.environ.get("PORT", 8080)),
-        share=False)
+        share=False, **ui.LAUNCH_KWARGS)

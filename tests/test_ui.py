@@ -12,7 +12,7 @@ from gradio_client import Client
 
 demo = ui.build_demo(runtime.Hub(model=t.build()))
 demo.queue(default_concurrency_limit=2)
-_, url, _ = demo.launch(prevent_thread_lock=True, server_name="127.0.0.1", share=False, quiet=True)
+_, url, _ = demo.launch(prevent_thread_lock=True, server_name="127.0.0.1", share=False, quiet=True, **ui.LAUNCH_KWARGS)
 c = Client(url, verbose=False)
 r = c.predict(message="Hi", history=[], api_name="/respond")
 print("client got", len(r[0]), "chat messages")
@@ -22,7 +22,7 @@ print("UI SERVER TEST OK")
 
 demo2 = ui.build_demo(runtime.Hub(model=t.build()))
 demo2.queue()
-_, url2, _ = demo2.launch(prevent_thread_lock=True, server_name="127.0.0.1", server_port=7861, share=False, quiet=True)
+_, url2, _ = demo2.launch(prevent_thread_lock=True, server_name="127.0.0.1", server_port=7861, share=False, quiet=True, **ui.LAUNCH_KWARGS)
 c2 = Client(url2, verbose=False)
 c2.predict(message="Hi", history=[], api_name="/respond")
 r = c2.predict(message="Bain ACI, 10 days, beginner", history=[], api_name="/respond")

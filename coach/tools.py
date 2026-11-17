@@ -12,7 +12,8 @@ from . import config, security
 from .config import MAX_TURNS, MAX_RESEARCH_CALLS, MAX_PAGE_CHARS, MAX_PLAN_CHARS
 from .data import CASES, BEHAVIORAL, BEHAVIORAL_PROBES, FRAMEWORKS, RUBRICS
 from .store import (_short, _user_dir, _load_mem, _save_mem, _dim_stats, _memory_text,
-                    _user_text_count, _build_transcript)
+                    _user_text_count, _build_transcript, _stop_requested)
+
 
 
 # =====================================================================
@@ -125,11 +126,16 @@ def fetch_page(tool_context: ToolContext, reasoning: str, url: str) -> str:
 
     Args:
         reasoning: One sentence on why you are reading this page and what you hope to learn.
-        url: A full http or https URL taken from a search result.
+        url: The exact URL of a result returned by web_search in this session. Other URLs are refused.
     """
     over = _research_budget(tool_context)
     if over:
         return over
+    allowed = set(tool_context.state.get("seen_urls", []))
+    if _norm_url(url or "") not in allowed:
+        security.log_event("fetch_refused", url=_short(url, 200), reason="not returned by web_search")
+        return ("ERROR: you can only read a page whose exact URL was returned by web_search in this session. "
+                "Run a search and use a URL from its results. Do not build or edit URLs yourself.")
     try:
         resp = security.safe_get(url)
         soup = BeautifulSoup(resp.content.decode(resp.encoding or "utf-8", errors="ignore"), "html.parser")
@@ -137,6 +143,7 @@ def fetch_page(tool_context: ToolContext, reasoning: str, url: str) -> str:
             tag.decompose()
         text = " ".join(soup.get_text(separator=" ").split())
         _remember_urls(tool_context, [url, getattr(resp, "final_url", url)])
+        security.log_event("fetch_ok", url=_short(url, 200))
         if not text:
             return "Page had no readable text."
         return security.wrap_untrusted(text[:MAX_PAGE_CHARS], url)
@@ -320,19 +327,26 @@ def end_interview(tool_context: ToolContext) -> str:
         return "ERROR: no active session."
     session = tool_context.session
     transcript = _build_transcript(session, info.get("start_event_index", 0))
-    answers = _user_text_count(session) - info.get("start_user_msgs", 0)
+    stopped = _stop_requested(session)
+    answers = _user_text_count(session) - info.get("start_user_msgs", 0) - (1 if stopped else 0)
     info["active"] = False
     info["ended"] = datetime.datetime.now().isoformat(timespec="seconds")
     tool_context.state["interview"] = info
     record = {
         "mode": info["mode"], "case_id": info.get("case_id", ""), "theme": info.get("theme", ""),
-        "answers": answers, "transcript": transcript, "feedback_saved": False,
+        "answers": answers, "transcript": transcript, "feedback_saved": False, "stopped_early": stopped,
     }
     tool_context.state["last_interview"] = record
     tdir = _user_dir(tool_context.user_id) / "transcripts"
     tdir.mkdir(exist_ok=True)
     stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     (tdir / f"{stamp}_{info['mode']}.txt").write_text(transcript)
+    if stopped and info["mode"] != "math" and answers < 2:
+        return (f"Session stopped early by the candidate after {answers} answers. NEXT: tell the candidate the session "
+                f"is stopped and was too short to grade, then transfer to coach.")
+    if stopped and info["mode"] != "math":
+        return (f"Session stopped early by the candidate after {answers} answers. NEXT: tell the candidate the session "
+                f"is stopped, then transfer to critic for feedback on what they did complete.")
     if info["mode"] == "math":
         return f"Session ended after {answers} answers. NEXT: give a one-line score summary, then transfer to coach."
     return f"Session ended after {answers} candidate answers. NEXT: transfer to critic for feedback."

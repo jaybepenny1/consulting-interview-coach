@@ -1,6 +1,6 @@
 # Evaluation harness (Milestone 2)
 
-Files: `tests/harness/cases.json` (the dataset: 12 cases, 5 adversarial) and `tests/harness/run_eval.py` (the runner).
+Files: `tests/harness/cases.json` (the dataset: 17 cases, 9 adversarial, including two indirect prompt injections planted in search results) and `tests/harness/run_eval.py` (the runner).
 
 Run from the `coach_repo` folder with your keys in the environment:
 

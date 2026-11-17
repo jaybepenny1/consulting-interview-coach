@@ -1,8 +1,10 @@
 """Runs the agents for many visitors, enforces the caps, and exposes the human approval gate."""
+import os
 import re
 import json
 import uuid
 import time
+import wave
 import asyncio
 
 from google.adk.agents.run_config import RunConfig
@@ -12,7 +14,7 @@ from google.genai import types
 
 from . import config, security
 from .agents import build_agents
-from .store import _short, _memory_text, delete_user_data, cleanup_old
+from .store import _short, _memory_text, delete_user_data, cleanup_old, STOP_MARK
 
 LABELS = {"coach": "Coach", "researcher": "Researcher", "interviewer": "Interviewer", "critic": "Critic"}
 
@@ -33,14 +35,31 @@ HELP = """Commands:
   /plan       prep plan only                              /memory     show what the coach remembers
   /case [type]  profitability, market_entry,              /new        start a fresh conversation
                 market_sizing, operations                 /help       show this list
-  /behavioral [theme]   /framework   /math
-Or just type naturally."""
+  /behavioral [theme]   /framework   /math                /stop       end the current practice session early
+Or just type naturally. You can also speak an answer with the microphone."""
+
+STOP_PROMPT = STOP_MARK + " I want to stop this practice session now."
+AUDIO_TYPES = {".wav": "audio/wav", ".mp3": "audio/mp3", ".ogg": "audio/ogg", ".m4a": "audio/m4a",
+               ".webm": "audio/webm", ".flac": "audio/flac"}
+TRANSCRIBE_PROMPT = ("Transcribe this recording of a job candidate speaking. Output only the words that were spoken, "
+                     "with no commentary, labels or formatting. If there is no clear speech, output nothing.")
+
+
+async def gemini_transcribe(data: bytes, mime: str) -> str:
+    from google import genai
+    client = genai.Client()
+    resp = await client.aio.models.generate_content(
+        model=config.MODEL,
+        contents=[types.Part.from_bytes(data=data, mime_type=mime), TRANSCRIBE_PROMPT],
+        config=types.GenerateContentConfig(temperature=0, max_output_tokens=600))
+    return resp.text or ""
 
 _global = {"count": 0, "day": time.strftime("%Y-%m-%d")}
 
 
 class Hub:
-    def __init__(self, model=None):
+    def __init__(self, model=None, transcriber=None):
+        self.transcriber = transcriber or gemini_transcribe
         self.sessions = InMemorySessionService()
         self.runner = Runner(app_name=config.APP_NAME, agent=build_agents(model),
                              session_service=self.sessions, auto_create_session=True)
@@ -50,7 +69,7 @@ class Hub:
         cleanup_old()
         uid = "v" + uuid.uuid4().hex[:10]
         security.log_event("visitor_new", visitor=security.visitor_hash(uid))
-        return {"id": uid, "session": uid + "-1", "count": 0, "pending": None, "steps": []}
+        return {"id": uid, "session": uid + "-1", "count": 0, "pending": None, "steps": [], "transcripts": 0}
 
     def delete_data(self, v: dict) -> dict:
         removed = delete_user_data(v["id"])
@@ -100,7 +119,7 @@ class Hub:
                             continue
                         steps.append({"who": who, "kind": "result", "text": _short(fr.response, 220)})
                     elif p.text and ev.author != "user":
-                        msgs.append((who, p.text))
+                        msgs.append((who, security.sanitize_output(p.text)))
         except Exception as e:
             security.log_event("run_error", visitor=security.visitor_hash(v["id"]), error=type(e).__name__, detail=_short(e, 200))
             msgs.append(("System", f"Something went wrong ({type(e).__name__}). Please try again in a moment."))
@@ -128,10 +147,10 @@ class Hub:
             v["session"] = f"{v['id']}-{n}"
             return {"messages": [("Coach", "Started a fresh conversation. Your saved profile and history are kept.")], "pending": None}
 
-        today = time.strftime("%Y-%m-%d")
-        if _global["day"] != today:
-            _global.update(day=today, count=0)
-        if v["count"] >= config.MAX_MESSAGES_PER_SESSION or _global["count"] >= config.GLOBAL_MESSAGES_PER_DAY:
+        if cmd == "/stop" and not await self.interview_active(v):
+            return {"messages": [("Coach", "No practice session is running right now. Start one with /case, /behavioral, /framework or /math.")], "pending": None}
+
+        if self._over_cap(v["count"], config.MAX_MESSAGES_PER_SESSION):
             security.log_event("cap_hit", cap="messages", visitor=security.visitor_hash(v["id"]))
             return {"messages": [("System", "This demo has reached its usage limit to keep costs bounded. Please try again later.")], "pending": None}
         flags = security.injection_flags(text)
@@ -140,9 +159,63 @@ class Hub:
                                patterns=flags, text=_short(text, 300))
         v["count"] += 1
         _global["count"] += 1
-        prompt = SLASH[cmd].format(arg=arg).strip() if cmd in SLASH else text
+        prompt = STOP_PROMPT if cmd == "/stop" else SLASH[cmd].format(arg=arg).strip() if cmd in SLASH else text
         security.log_event("message", visitor=security.visitor_hash(v["id"]), chars=len(text), n=v["count"])
         return await self._run(v, types.Content(role="user", parts=[types.Part(text=prompt)]))
+
+    @staticmethod
+    def _over_cap(used: int, limit: int) -> bool:
+        today = time.strftime("%Y-%m-%d")
+        if _global["day"] != today:
+            _global.update(day=today, count=0)
+        return used >= limit or _global["count"] >= config.GLOBAL_MESSAGES_PER_DAY
+
+    async def interview_active(self, v: dict) -> bool:
+        sess = await self.sessions.get_session(app_name=config.APP_NAME, user_id=v["id"], session_id=v["session"])
+        return bool(sess and (sess.state.get("interview") or {}).get("active"))
+
+    async def transcribe(self, v: dict, path: str) -> dict:
+        """Turn one spoken answer into text for the message box. Returns {'text': str, 'note': str}.
+        The recording is deleted as soon as it has been read."""
+        try:
+            if not path or not os.path.exists(path):
+                return {"text": "", "note": "No recording was received."}
+            ext = os.path.splitext(path)[1].lower()
+            size = os.path.getsize(path)
+            seconds = None
+            if ext == ".wav":
+                try:
+                    with wave.open(path, "rb") as w:
+                        seconds = w.getnframes() / float(w.getframerate() or 1)
+                except Exception:
+                    seconds = None
+            with open(path, "rb") as f:
+                data = f.read(config.MAX_AUDIO_BYTES + 1)
+        finally:
+            try:
+                if path and os.path.exists(path):
+                    os.remove(path)
+            except OSError:
+                pass
+        if ext not in AUDIO_TYPES:
+            return {"text": "", "note": "That audio format is not supported."}
+        if size > config.MAX_AUDIO_BYTES or (seconds or 0) > config.MAX_AUDIO_SECONDS + 2:
+            return {"text": "", "note": f"That recording is too long. Please keep spoken answers under {config.MAX_AUDIO_SECONDS} seconds."}
+        if self._over_cap(v["transcripts"], config.MAX_TRANSCRIPTIONS_PER_SESSION):
+            security.log_event("cap_hit", cap="transcriptions", visitor=security.visitor_hash(v["id"]))
+            return {"text": "", "note": "The voice limit for this demo has been reached. Please type your answer."}
+        v["transcripts"] += 1
+        _global["count"] += 1
+        security.log_event("transcribe", visitor=security.visitor_hash(v["id"]), bytes=size, seconds=round(seconds or 0, 1))
+        try:
+            text = await self.transcriber(data, AUDIO_TYPES[ext])
+        except Exception as e:
+            security.log_event("transcribe_error", visitor=security.visitor_hash(v["id"]), error=type(e).__name__, detail=_short(e, 200))
+            return {"text": "", "note": "Sorry, the recording could not be transcribed. Please try again or type your answer."}
+        text = " ".join(security.sanitize_output(text).split())[:config.MAX_INPUT_CHARS]
+        if not text:
+            return {"text": "", "note": "No speech was detected. Please try again."}
+        return {"text": text, "note": "Transcribed. Check the text, edit it if needed, then press Send."}
 
     async def decide(self, v: dict, approved: bool) -> dict:
         """Answer the pending approval request (the human gate)."""

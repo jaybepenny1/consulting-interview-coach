@@ -65,6 +65,14 @@ Then delete both API keys.
 ## Link on GitHub Pages
 Push the repo, then Settings -> Pages -> Deploy from branch -> `main` and folder `/docs`. Edit `docs/index.html` and replace `CLOUD_RUN_URL` with your service link. GitHub Pages only hosts the landing page; the agent runs on Cloud Run.
 
+## Features added for Milestone 3
+- `/stop` (or the Stop session button) ends a practice session early.
+- Microphone: speak an answer (up to 60 seconds); it is transcribed by Gemini into the text box for you to edit before sending.
+- Webcam: record yourself and watch it back. The video stays in the browser and is never uploaded.
+- Security: the Researcher can only open URLs its own search returned; images are stripped from model output; agents no longer
+  see each other's sensitive tool results; the Critic cannot be reached while an interview is still running.
+- Evidence: `docs/attack_session.md` (manual attack checklist and log export), test pages in `docs/redteam/`, 17 eval cases (9 adversarial).
+
 ## Safety limits (see `coach/config.py`)
 1,500 output tokens per answer, 20 tool calls and 30 model calls per message, 30 messages per visitor, 300 per day overall, 1500 characters per message.
 Only post the link in the Agent Arcade thread (classmates may try prompt injection there and nowhere else).

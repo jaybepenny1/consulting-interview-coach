@@ -23,3 +23,9 @@ tools only on the Interviewer and Critic, and the Coach has neither.
 
 **What changed from Milestone 1:** the earlier build had six agents. The Planner and Writer did not pass the test (same tools
 and permissions as the Coach, no isolation benefit), so they were folded into the Coach.
+
+**Milestone 3 update.** ADK replays every agent's tool results to the next agent, so splitting the tools was not enough: the Coach
+could read the Interviewer's answer key and every agent could read raw web text in the shared history. A filter now runs before each
+model call. Raw web text and unapproved brief drafts reach only the Researcher; interviewer-only materials reach only the Interviewer
+and Critic. The other agents see web research only through the brief a human approved. This makes the permission split hold for what
+each agent can read as well as what it can do. It is still a permission argument, not a claim of smaller context windows.
