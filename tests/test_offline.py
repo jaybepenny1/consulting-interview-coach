@@ -142,6 +142,13 @@ async def main():
     r = await hub.decide(v, False)
     assert not (store._user_dir(v["id"]) / "brief.md").exists() and v["pending"] is None
     ok("reject: brief NOT saved")
+    # Reject-loop regression: the model sees ADK's rejection text, and the Researcher prompt must treat it as final
+    assert "This tool call is rejected" in SEEN["ctx"]["Researcher"][-1], "ADK rejection text changed: update the Researcher prompt"
+    ri = agents.RESEARCHER_INSTRUCTION
+    for need in ("CANDIDATE REJECTION", "This tool call is rejected", "Do NOT call save_brief again", "wait"):
+        assert need in ri, f"Researcher prompt missing: {need}"
+    assert "if it rejects, fix the problem and call it again" not in ri and "ask what to change and revise" not in ri
+    ok("reject loop: rejection text reaches the Researcher and its prompt says a Reject is final (ask what to change, no repeat save_brief)")
 
     # --- scenario B: approve path + plan ---
     llm = build(); hub = runtime.Hub(model=llm); v = hub.new_visitor()

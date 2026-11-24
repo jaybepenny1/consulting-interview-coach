@@ -333,7 +333,6 @@ def build_demo(hub: Hub = None):
         with gr.Row():
             with gr.Column(scale=3):
                 chat = gr.Chatbot(value=[{"role": "assistant", "content": bubble("Coach", WELCOME)}], height=480, label="Chat")
-                gr.HTML(CLUB_PLUG)
                 with gr.Group(visible=False, elem_id="gate") as gate:
                     gate_text = gr.Markdown("", elem_id="gate-text")
                     with gr.Row():
@@ -349,6 +348,7 @@ def build_demo(hub: Hub = None):
                     stop_speak = gr.Button("Stop speaking", size="sm", scale=1)
                 voice = gr.Audio(sources=["microphone"], type="filepath", format="wav", elem_id="voice",
                                  label=f"Speak your answer (up to {config.MAX_AUDIO_SECONDS} seconds). It appears as text for you to check before sending.")
+                gr.HTML(CLUB_PLUG)
                 voice_note = gr.Markdown("")
                 left = gr.Markdown(left_md(None))
             with gr.Column(scale=2):

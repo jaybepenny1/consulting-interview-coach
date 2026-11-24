@@ -43,11 +43,14 @@ with sync_playwright() as p:
     ex_top = pg.get_by_text("Try an example").bounding_box()
     assert cam_top["y"] < ex_top["y"] and chat_box["y"] <= cam_top["y"] <= chat_box["y"] + chat_box["height"], (chat_box, cam_top, ex_top)
     print("OK   layout: the camera panel is next to the chat box, above the examples and quick actions")
-    # club plug sits right under the chat, opens in a new tab
+    # club plug sits right under the "Speak your answer" recorder (above the Transcribed note), opens in a new tab
     plug = pg.locator("#club-plug a")
     assert plug.get_attribute("href") == "https://www.consultingclubgsu.com/" and plug.get_attribute("target") == "_blank"
-    assert pg.locator("#club-plug").bounding_box()["y"] >= chat_box["y"] + chat_box["height"] - 5
-    print("OK   Consulting Club plug is under the chat and links to the club site in a new tab")
+    pl, vc = pg.locator("#club-plug").bounding_box(), pg.locator("#voice").bounding_box()
+    assert pl["y"] >= vc["y"] + vc["height"] - 5, (pl, vc)
+    assert pl["y"] < pg.get_by_text("Messages left in this session").bounding_box()["y"]
+    assert pl["y"] > chat_box["y"] + chat_box["height"], "plug must no longer sit right under the chat"
+    print("OK   Consulting Club plug sits under the voice recorder and links to the club site in a new tab")
     assert pg.locator("input[type=file]").count() == 0, "no file upload control may exist"
     print("OK   there is no file-upload control anywhere on the page")
     # webcam (browser only)
@@ -66,6 +69,10 @@ with sync_playwright() as p:
     pg.wait_for_function("Array.from(document.querySelectorAll('textarea')).some(x => x.value.includes('spoken answer'))", timeout=20000)
     val = pg.evaluate("Array.from(document.querySelectorAll('textarea')).map(x => x.value).find(v => v.includes('spoken answer'))")
     print("OK   microphone: recording transcribed into the message box ->", val)
+    note = pg.get_by_text("Transcribed. Check the text").bounding_box()
+    pl = pg.locator("#club-plug").bounding_box()
+    assert pl["y"] + pl["height"] <= note["y"] + 2, (pl, note)
+    print("OK   after a recording, the plug is between the recorder and the 'Transcribed. Check the text' note")
     # approval card: readable (no sideways scrolling), site-name links, exact text one click away
     box.fill("Bain ACI, 10 days, beginner"); box.press("Enter")
     pg.wait_for_selector("#gate-text", state="visible", timeout=30000)
